@@ -6,6 +6,9 @@
 //   swift scripts/compose.swift --frames <framesDir> <outDir> <colorA hex> <colorB hex>
 //     framesDir holds frames.json and the symbol strips it names (see the app's --timeline mode); writes one dark menu
 //     bar frame per entry to <outDir>/frame-NNN.png and <outDir>/frames.txt, a list for ffmpeg's concat demuxer.
+//   swift scripts/compose.swift --scene <scene.json> <rawDir> <outDir> <colorA hex> <colorB hex>
+//     plays a scripted scene on a whole desktop (windows, snap zones, the open menu, pointer, clicks, captions, a changing
+//     resolution) and writes its frames like --frames; see `Shot` for the format. Panels come from rawDir as for pages.
 // The colours are the app icon's two gradient colours. Sizes follow a MacBook menu bar (37 pt tall), measured on macOS 27.
 import AppKit
 import ImageIO
@@ -13,9 +16,10 @@ import UniformTypeIdentifiers
 
 let args = CommandLine.arguments
 let framesMode = args.count > 1 && args[1] == "--frames"
-let a = framesMode ? Array(args.dropFirst()) : args
-guard a.count >= (framesMode ? 5 : 6) else {
-    FileHandle.standardError.write(Data("usage: compose.swift [--frames] rawDir outDir colorA colorB [page...]\n".utf8)); exit(2)
+let sceneFile = args.count > 2 && args[1] == "--scene" ? args[2] : nil
+let a = framesMode ? Array(args.dropFirst()) : sceneFile != nil ? Array(args.dropFirst(2)) : args
+guard a.count >= (framesMode || sceneFile != nil ? 5 : 6) else {
+    FileHandle.standardError.write(Data("usage: compose.swift [--frames | --scene scene.json] rawDir outDir colorA colorB [page...]\n".utf8)); exit(2)
 }
 let rawDir = a[1], outDir = a[2], pages = Array(a.dropFirst(5))
 let scale: CGFloat = 2, panelWidth: CGFloat = 380, margin: CGFloat = 48, barHeight: CGFloat = 37, gap: CGFloat = 6
@@ -23,6 +27,8 @@ let scale: CGFloat = 2, panelWidth: CGFloat = 380, margin: CGFloat = 48, barHeig
 let edge: CGFloat = 12, panelInset: CGFloat = 10, spacing: CGFloat = 20
 /// Status items carry 8 pt of their own margin on each side inside the symbol strip.
 let itemMargin: CGFloat = 8
+/// Pixels per point of the written images; scenes may lower it to keep large GIFs small.
+var outputScale: CGFloat = 2
 
 func rgb(_ hex: String) -> [CGFloat] {
     let v = UInt32(hex, radix: 16) ?? 0
@@ -78,9 +84,9 @@ func clusterWidth(strip: CGFloat) -> CGFloat {
 
 /// Creates a top-down context (y = 0 is the top edge) of the given size in points.
 func canvas(width: CGFloat, height: CGFloat) -> CGContext {
-    let ctx = CGContext(data: nil, width: Int(width * scale), height: Int(height * scale), bitsPerComponent: 8, bytesPerRow: 0,
+    let ctx = CGContext(data: nil, width: Int(width * outputScale), height: Int(height * outputScale), bitsPerComponent: 8, bytesPerRow: 0,
                         space: sRGB, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-    ctx.scaleBy(x: scale, y: scale)
+    ctx.scaleBy(x: outputScale, y: outputScale)
     ctx.translateBy(x: 0, y: height); ctx.scaleBy(x: 1, y: -1)
     NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
     return ctx
@@ -163,7 +169,19 @@ func compose(page: String, dark: Bool) {
     wallpaper(ctx, width: width, height: height, dark: dark)
     let stripX = menuBar(ctx, width: width, strip: strip, dark: dark, highlighted: true)
 
-    let rect = CGRect(x: min(stripX + itemMargin, width - panelInset - panelWidth), y: barHeight + gap, width: panelWidth, height: panelHeight)
+    drawPanel(ctx, panel, in: panelRect(stripX: stripX, width: width, height: panelHeight), dark: dark)
+
+    let path2 = "\(outDir)/\(page)-\(dark ? "dark" : "light").png"
+    write(ctx, to: path2)
+    print(path2)
+}
+
+/// Where macOS opens the panel: left-aligned with the item, pushed left where it would cross the screen edge.
+func panelRect(stripX: CGFloat, width: CGFloat, height: CGFloat) -> CGRect {
+    CGRect(x: min(stripX + itemMargin, width - panelInset - panelWidth), y: barHeight + gap, width: panelWidth, height: height)
+}
+
+func drawPanel(_ ctx: CGContext, _ panel: CGImage, in rect: CGRect, dark: Bool) {
     let radius: CGFloat = 14
     let path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
     ctx.saveGState()
@@ -178,10 +196,6 @@ func compose(page: String, dark: Bool) {
     ctx.setStrokeColor(CGColor(gray: dark ? 1 : 0, alpha: dark ? 0.2 : 0.12)); ctx.setLineWidth(0.5)
     ctx.addPath(CGPath(roundedRect: rect.insetBy(dx: 0.25, dy: 0.25), cornerWidth: radius - 0.25, cornerHeight: radius - 0.25, transform: nil))
     ctx.strokePath()
-
-    let path2 = "\(outDir)/\(page)-\(dark ? "dark" : "light").png"
-    write(ctx, to: path2)
-    print(path2)
 }
 
 /// One frame of a menu bar animation: {"symbol": file, "duration": seconds, "caption": text, "cursor": [dx, dy]}.
@@ -234,7 +248,199 @@ func composeFrames() {
     print("\(outDir)/frames.txt (\(frames.count) frames)")
 }
 
-if framesMode {
+// MARK: Scenes
+
+/// A window on the scene's desktop, drawn as a generic macOS window: `rect` is x, y, width, height in points.
+struct Window: Decodable { let id: String; let title: String; let rect: [CGFloat] }
+
+/// One step of a scene. Positions are points from the top left of the screen. `symbol`, `windows`, `zoom` and `caption`
+/// carry over to later steps until changed; everything else applies to this step only.
+///   duration  seconds the step is held           move    seconds to glide there from the previous step first
+///   symbol    page whose menu bar symbol is shown panel   page whose menu is open (none: menu closed)
+///   cursor    [x, y] on the screen                target  instead of cursor: "@item" (the menu bar item) or a control
+///             the app recorded in <panel>-targets.json; `point` picks [fx, fy] inside it (default centre)
+///   click     a click ring at the pointer         key     a key cap next to the pointer, e.g. "⌃ control"
+///   windows   the desktop's windows (glide by id) zones   snap zones shown over the desktop, `zone` the highlighted one
+///   zoom      the desktop's size factor, < 1 shows more space (a display resolution change), black   0…1 fade to black
+///   caption   text along the bottom ("" hides it)
+struct Shot: Decodable {
+    let duration: Double; let move: Double?
+    let symbol: String?; let panel: String?
+    let cursor: [CGFloat]?; let target: String?; let point: [CGFloat]?
+    let click: Bool?; let key: String?
+    let windows: [Window]?; let zones: [[CGFloat]]?; let zone: Int?
+    let zoom: CGFloat?; let black: CGFloat?; let caption: String?
+}
+struct Scene: Decodable { let screen: [CGFloat]; let scale: CGFloat?; let shots: [Shot] }
+
+/// The scene's state at one moment, after carrying over and resolving every step.
+struct State {
+    var symbol = "", panel: String?, cursor = CGPoint.zero, click = false, key: String?
+    var windows: [Window] = [], rects: [String: CGRect] = [:], zones: [CGRect] = [], zone: Int?
+    var zoom: CGFloat = 1, black: CGFloat = 0, caption = ""
+}
+
+func rect(_ v: [CGFloat]) -> CGRect { CGRect(x: v[0], y: v[1], width: v[2], height: v[3]) }
+func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
+func lerp(_ a: CGRect, _ b: CGRect, _ t: CGFloat) -> CGRect {
+    CGRect(x: lerp(a.minX, b.minX, t), y: lerp(a.minY, b.minY, t), width: lerp(a.width, b.width, t), height: lerp(a.height, b.height, t))
+}
+
+let accent = CGColor(srgbRed: 0.04, green: 0.52, blue: 1, alpha: 1)
+func accent(_ alpha: CGFloat) -> CGColor { accent.copy(alpha: alpha)! }
+
+/// A dark macOS window: title bar with the three buttons, a sidebar and placeholder content, so it reads as "some app".
+func drawWindow(_ ctx: CGContext, _ title: String, _ r: CGRect) {
+    let radius: CGFloat = 12, path = CGPath(roundedRect: r, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: 10), blur: 28, color: CGColor(gray: 0, alpha: 0.55))
+    ctx.setFillColor(CGColor(gray: 0.13, alpha: 1)); ctx.addPath(path); ctx.fillPath()
+    ctx.restoreGState()
+    ctx.saveGState(); ctx.addPath(path); ctx.clip()
+    let sidebar = min(150, r.width * 0.28)
+    ctx.setFillColor(CGColor(gray: 0.17, alpha: 1)); ctx.fill(CGRect(x: r.minX, y: r.minY, width: sidebar, height: r.height))
+    for (i, color) in [(1.0, 0.37, 0.34), (1.0, 0.74, 0.18), (0.16, 0.78, 0.25)].enumerated() {
+        ctx.setFillColor(CGColor(srgbRed: color.0, green: color.1, blue: color.2, alpha: 1))
+        ctx.fillEllipse(in: CGRect(x: r.minX + 14 + CGFloat(i) * 20, y: r.minY + 13, width: 12, height: 12))
+    }
+    ctx.setFillColor(CGColor(gray: 1, alpha: 0.10))
+    var y = r.minY + 48
+    while y + 10 < r.maxY - 10 {   // sidebar rows and content lines
+        if r.minX + 14 + sidebar - 28 > r.minX + 14 {
+            ctx.addPath(CGPath(roundedRect: CGRect(x: r.minX + 14, y: y, width: sidebar - 28, height: 9), cornerWidth: 4.5, cornerHeight: 4.5, transform: nil))
+        }
+        let line = (r.width - sidebar - 40) * (0.55 + 0.4 * abs(sin(y * 0.7)))
+        if line > 8 { ctx.addPath(CGPath(roundedRect: CGRect(x: r.minX + sidebar + 20, y: y, width: line, height: 9), cornerWidth: 4.5, cornerHeight: 4.5, transform: nil)) }
+        y += 22
+    }
+    ctx.fillPath()
+    let style = NSMutableParagraphStyle(); style.alignment = .center; style.lineBreakMode = .byTruncatingTail
+    NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor(white: 1, alpha: 0.85),
+                                                   .paragraphStyle: style])
+        .draw(in: NSRect(x: r.minX + sidebar, y: r.minY + 10, width: r.width - sidebar, height: 18))
+    ctx.restoreGState()
+    ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.14)); ctx.setLineWidth(0.5)
+    ctx.addPath(CGPath(roundedRect: r.insetBy(dx: 0.25, dy: 0.25), cornerWidth: radius, cornerHeight: radius, transform: nil)); ctx.strokePath()
+}
+
+/// Snap zones as the app's overlay draws them: accent tint, the zone under the pointer stronger with a thick border.
+func drawZones(_ ctx: CGContext, _ zones: [CGRect], hot: Int?) {
+    for (i, zone) in zones.enumerated() {
+        let path = CGPath(roundedRect: zone.insetBy(dx: 4, dy: 4), cornerWidth: 12, cornerHeight: 12, transform: nil)
+        ctx.setFillColor(accent(i == hot ? 0.38 : 0.12)); ctx.addPath(path); ctx.fillPath()
+        ctx.setStrokeColor(accent(i == hot ? 1 : 0.5)); ctx.setLineWidth(i == hot ? 3 : 1); ctx.addPath(path); ctx.strokePath()
+    }
+}
+
+func pill(_ ctx: CGContext, _ text: String, centre: CGPoint, size: CGFloat, fill: CGColor) {
+    let label = NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .semibold), .foregroundColor: NSColor.white])
+    let s = label.size(), r = CGRect(x: centre.x - s.width / 2 - size * 0.9, y: centre.y - s.height / 2 - size * 0.45,
+                                     width: s.width + size * 1.8, height: s.height + size * 0.9)
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: 3), blur: 10, color: CGColor(gray: 0, alpha: 0.4))
+    ctx.setFillColor(fill); ctx.addPath(CGPath(roundedRect: r, cornerWidth: r.height / 2, cornerHeight: r.height / 2, transform: nil)); ctx.fillPath()
+    ctx.restoreGState()
+    label.draw(at: NSPoint(x: r.minX + size * 0.9, y: r.minY + size * 0.45))
+}
+
+func playScene(_ file: String) {
+    guard let data = FileManager.default.contents(atPath: file), let scene = try? JSONDecoder().decode(Scene.self, from: data), !scene.shots.isEmpty else {
+        FileHandle.standardError.write(Data("missing or invalid \(file)\n".utf8)); exit(1)
+    }
+    outputScale = scene.scale ?? 1
+    let width = scene.screen[0], height = scene.screen[1]
+    var panels: [String: CGImage] = [:], strips: [String: CGImage] = [:], targets: [String: [String: [CGFloat]]] = [:]
+    func panel(_ page: String) -> CGImage { if let p = panels[page] { return p }; let p = load("\(rawDir)/\(page)-dark.png"); panels[page] = p; return p }
+    func strip(_ page: String) -> CGImage { if let s = strips[page] { return s }; let s = symbol("\(rawDir)/\(page)-symbol.png", dark: true); strips[page] = s; return s }
+    func targetRects(_ page: String) -> [String: [CGFloat]] {
+        if let t = targets[page] { return t }
+        let t = (FileManager.default.contents(atPath: "\(rawDir)/\(page)-targets.json")).flatMap { try? JSONDecoder().decode([String: [CGFloat]].self, from: $0) } ?? [:]
+        targets[page] = t; return t
+    }
+    /// The screen as it looks at desktop size `zoom`: logical width and height and where the item and panel sit.
+    func layout(_ s: State) -> (w: CGFloat, h: CGFloat, stripX: CGFloat) {
+        let w = width / s.zoom, h = height / s.zoom, st = strip(s.symbol)
+        return (w, h, w - clusterWidth(strip: CGFloat(st.width) / scale))
+    }
+
+    var states: [(State, Double)] = []
+    var current = State(), lastPanel: String?
+    for (i, shot) in scene.shots.enumerated() {
+        var next = current
+        next.symbol = shot.symbol ?? (i == 0 ? "" : current.symbol)
+        next.panel = shot.panel; next.click = shot.click ?? false; next.key = shot.key
+        if let w = shot.windows { next.windows = w; next.rects = Dictionary(uniqueKeysWithValues: w.map { ($0.id, rect($0.rect)) }) }
+        next.zones = shot.zones?.map(rect) ?? []; next.zone = shot.zone
+        next.zoom = shot.zoom ?? current.zoom; next.black = shot.black ?? 0; next.caption = shot.caption ?? current.caption
+        if let page = shot.panel { lastPanel = page }
+        let l = layout(next)
+        if let c = shot.cursor { next.cursor = CGPoint(x: c[0], y: c[1]) }
+        if let t = shot.target {
+            let st = strip(next.symbol), sw = CGFloat(st.width) / scale
+            var box = CGRect(x: l.stripX + itemMargin, y: 6, width: sw - 2 * itemMargin, height: barHeight - 12)
+            if t != "@item", let page = shot.panel ?? lastPanel, let v = targetRects(page)[t] {
+                let p = panelRect(stripX: l.stripX, width: l.w, height: CGFloat(panel(page).height) / scale)
+                box = CGRect(x: p.minX + v[0], y: p.minY + v[1], width: v[2], height: v[3])
+            } else if t != "@item" { FileHandle.standardError.write(Data("unknown target \(t)\n".utf8)); exit(1) }
+            let f = shot.point ?? [0.5, 0.5]
+            next.cursor = CGPoint(x: box.minX + box.width * f[0], y: box.minY + box.height * f[1])
+        }
+        if let move = shot.move, move > 0, i > 0 {   // glide: pointer, windows, desktop size and fade ease in and out
+            let steps = max(2, Int((move * 25).rounded()))
+            for k in 1..<steps {
+                let x = CGFloat(k) / CGFloat(steps), t = x * x * (3 - 2 * x)
+                var mid = current
+                mid.click = false; mid.key = next.key; mid.zones = next.zones; mid.zone = next.zone; mid.panel = current.panel
+                mid.cursor = CGPoint(x: lerp(current.cursor.x, next.cursor.x, t), y: lerp(current.cursor.y, next.cursor.y, t))
+                mid.zoom = lerp(current.zoom, next.zoom, t); mid.black = lerp(current.black, next.black, t)
+                mid.windows = next.windows
+                mid.rects = Dictionary(uniqueKeysWithValues: next.windows.map { w in (w.id, lerp(current.rects[w.id] ?? rect(w.rect), rect(w.rect), t)) })
+                states.append((mid, 0.04))
+            }
+        }
+        if next.click && shot.duration > 0.4 {   // the click ring flashes briefly, then the new state holds without it
+            states.append((next, 0.3)); next.click = false; states.append((next, shot.duration - 0.3))
+        } else {
+            states.append((next, shot.duration))
+        }
+        current = next
+    }
+
+    var list = ""
+    for (i, (s, duration)) in states.enumerated() {
+        let ctx = canvas(width: width, height: height)
+        let l = layout(s)
+        ctx.saveGState(); ctx.scaleBy(x: s.zoom, y: s.zoom)
+        wallpaper(ctx, width: l.w, height: l.h, dark: true)
+        for w in s.windows { drawWindow(ctx, w.title, s.rects[w.id] ?? rect(w.rect)) }
+        drawZones(ctx, s.zones, hot: s.zone)
+        menuBar(ctx, width: l.w, strip: strip(s.symbol), dark: true, highlighted: s.panel != nil)
+        if let page = s.panel {
+            let image = panel(page)
+            drawPanel(ctx, image, in: panelRect(stripX: l.stripX, width: l.w, height: CGFloat(image.height) / scale), dark: true)
+        }
+        ctx.restoreGState()
+        let tip = CGPoint(x: s.cursor.x * s.zoom, y: s.cursor.y * s.zoom)
+        if s.click {
+            ctx.setFillColor(accent(0.18)); ctx.fillEllipse(in: CGRect(x: tip.x - 15, y: tip.y - 15, width: 30, height: 30))
+            ctx.setStrokeColor(accent(0.9)); ctx.setLineWidth(2); ctx.strokeEllipse(in: CGRect(x: tip.x - 15, y: tip.y - 15, width: 30, height: 30))
+        }
+        arrow(ctx, at: tip)
+        if let key = s.key { pill(ctx, key, centre: CGPoint(x: tip.x + 46, y: tip.y + 34), size: 12, fill: CGColor(gray: 0.1, alpha: 0.88)) }
+        if s.black > 0 { ctx.setFillColor(CGColor(gray: 0, alpha: s.black)); ctx.fill(CGRect(x: 0, y: 0, width: width, height: height)) }
+        if !s.caption.isEmpty { pill(ctx, s.caption, centre: CGPoint(x: width / 2, y: height - 34), size: 15, fill: CGColor(gray: 0.08, alpha: 0.82)) }
+        let name = String(format: "frame-%03d.png", i)
+        write(ctx, to: "\(outDir)/\(name)")
+        list += "file '\(name)'\nduration \(duration)\n"
+    }
+    list += "file '\(String(format: "frame-%03d.png", states.count - 1))'\n"
+    try? list.write(toFile: "\(outDir)/frames.txt", atomically: true, encoding: .utf8)
+    print("\(outDir)/frames.txt (\(states.count) frames)")
+}
+
+if let sceneFile {
+    playScene(sceneFile)
+} else if framesMode {
     composeFrames()
 } else {
     for (i, page) in pages.enumerated() {

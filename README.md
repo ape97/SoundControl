@@ -1,19 +1,32 @@
-# Sound Control
+<p align="center">
+  <img src="docs/images/icon.png" alt="Sound Control icon" width="128">
+</p>
 
-[![macOS 26+](https://img.shields.io/badge/macOS-26%2B-black?logo=apple)](#requirements)
-[![Swift](https://img.shields.io/badge/Swift-SwiftUI-orange?logo=swift)](docs/DEVELOPMENT.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
-[![AI-assisted](https://img.shields.io/badge/built%20with-AI%20assistance-8A2BE2)](#ai-assisted-development)
+<h1 align="center">Sound Control</h1>
 
-A lightweight menu bar mixer for macOS in the style of Control Center: per-app volume, output boost and device switching.
+<p align="center">A lightweight menu bar mixer for macOS in the style of Control Center: per-app volume, output boost and device switching.</p>
 
 <p align="center">
-  <img src="docs/images/main-dark.png" alt="Sound Control menu (dark)" width="400">
-  <img src="docs/images/main-light.png" alt="Sound Control menu (light)" width="400">
+  <a href="#requirements"><img src="https://img.shields.io/badge/macOS-26%2B-black?logo=apple" alt="macOS 26+"></a>
+  <a href="docs/DEVELOPMENT.md"><img src="https://img.shields.io/badge/Swift-SwiftUI-orange?logo=swift" alt="Swift"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
+  <a href="#ai-assisted-development"><img src="https://img.shields.io/badge/built%20with-AI%20assistance-8A2BE2" alt="AI-assisted"></a>
 </p>
 
 > [!NOTE]
 > This app was developed with AI assistance. See [AI-assisted development](#ai-assisted-development).
+
+## In action
+
+### Per-app volume and devices
+
+<p align="center">
+  <img src="docs/images/mixer.gif" alt="Turning Safari down and boosting it while music keeps playing, then switching the output to AirPods" width="720">
+</p>
+
+Drag an app's slider to turn it down, or beyond 100 % to boost it, while every other app keeps its level. The output device is switched from the same menu.
+
+<sub>The animations are rendered by the app itself from invented demo data; nothing on your Mac is recorded.</sub>
 
 ## Features
 
@@ -25,6 +38,11 @@ A lightweight menu bar mixer for macOS in the style of Control Center: per-app v
 - **Remembers** your settings per app across restarts; quiet apps collapse under "More Apps", nothing jumps while you drag.
 
 ## Screenshots
+
+<p align="center">
+  <img src="docs/images/main-dark.png" alt="Sound Control menu (dark)" width="400">
+  <img src="docs/images/main-light.png" alt="Sound Control menu (light)" width="400">
+</p>
 
 <table>
 <tr>

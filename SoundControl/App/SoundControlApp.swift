@@ -249,7 +249,8 @@ final class AppModel {
         demoApps = candidates.enumerated().map { i, c in
             AudioApp(id: c.0, name: c.1, pid: -1, processObjects: [AudioObjectID(90000 + i)], isPlaying: c.2)
         }
-        mixer.setVolume(0.62, for: "com.apple.Safari")
+        // `--safari <percent>` sets Safari's volume, one frame of the README animation each.
+        mixer.setVolume(Runtime.value(after: "--safari").flatMap(Float.init).map { $0 / 100 } ?? 0.62, for: "com.apple.Safari")
         mixer.setProfile(.bassBoost, for: "com.apple.Music")
         mixer.setVolume(1.4, for: "com.apple.Music")
         mixer.setVolume(0, for: "com.apple.FaceTime")
@@ -367,6 +368,7 @@ enum Snapshot {
             effect.cacheDisplay(in: effect.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(base)-\(suffix).png"))
         }
+        DemoTargets.write(to: "\(base)-targets.json")
         // Menu bar symbol on a light (top) and a dark (bottom) 24 pt strip at double resolution; scripts/compose.swift reads it.
         let icon = AppModel.shared.menuBarImage
         let width: CGFloat = 44, height: CGFloat = 24

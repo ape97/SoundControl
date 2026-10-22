@@ -26,7 +26,7 @@ struct SettingsPage: View {
                     Spacer()
                     Toggle("Open at Login", isOn: Binding(get: { launchAtLogin }, set: { LoginItem.set($0); launchAtLogin = LoginItem.isEnabled }))
                         .labelsHidden()
-                        .toggleStyle(.switch)
+                        .toggleStyle(.setting)
                         .controlSize(.small)
                         .help("Start Sound Control automatically when you log in")
                 }

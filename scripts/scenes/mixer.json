@@ -1,0 +1,216 @@
+{
+ "screen": [
+  960,
+  680
+ ],
+ "scale": 2,
+ "shots": [
+  {
+   "duration": 1.4,
+   "symbol": "main",
+   "cursor": [
+    300,
+    600
+   ],
+   "caption": "Sound Control: a volume for every app",
+   "windows": [
+    {
+     "id": "s",
+     "title": "Safari",
+     "rect": [
+      40,
+      90,
+      420,
+      300
+     ]
+    },
+    {
+     "id": "m",
+     "title": "Music",
+     "rect": [
+      200,
+      300,
+      380,
+      280
+     ]
+    }
+   ]
+  },
+  {
+   "duration": 0.15,
+   "move": 0.7,
+   "target": "@item"
+  },
+  {
+   "duration": 0.6,
+   "panel": "main",
+   "symbol": "main",
+   "target": "@item",
+   "click": true
+  },
+  {
+   "duration": 0.6,
+   "move": 0.6,
+   "panel": "main",
+   "target": "slider-Safari",
+   "point": [
+    0.31,
+    0.5
+   ],
+   "caption": "Turn Safari down, the music keeps playing"
+  },
+  {
+   "duration": 0.12,
+   "move": 0.18,
+   "panel": "safari-45",
+   "target": "slider-Safari",
+   "point": [
+    0.225,
+    0.5
+   ]
+  },
+  {
+   "duration": 0.12,
+   "move": 0.18,
+   "panel": "safari-30",
+   "target": "slider-Safari",
+   "point": [
+    0.15,
+    0.5
+   ]
+  },
+  {
+   "duration": 0.12,
+   "move": 0.18,
+   "panel": "safari-20",
+   "target": "slider-Safari",
+   "point": [
+    0.1,
+    0.5
+   ]
+  },
+  {
+   "duration": 0.9,
+   "panel": "safari-20",
+   "target": "slider-Safari",
+   "point": [
+    0.1,
+    0.5
+   ]
+  },
+  {
+   "duration": 0.3,
+   "panel": "safari-20",
+   "target": "slider-Safari",
+   "point": [
+    0.1,
+    0.5
+   ],
+   "caption": "Or boost a quiet app beyond 100 %"
+  },
+  {
+   "duration": 0.12,
+   "move": 0.22,
+   "panel": "safari-60",
+   "target": "slider-Safari",
+   "point": [
+    0.3,
+    0.5
+   ]
+  },
+  {
+   "duration": 0.12,
+   "move": 0.22,
+   "panel": "safari-100",
+   "target": "slider-Safari",
+   "point": [
+    0.5,
+    0.5
+   ]
+  },
+  {
+   "duration": 0.12,
+   "move": 0.22,
+   "panel": "safari-125",
+   "target": "slider-Safari",
+   "point": [
+    0.625,
+    0.5
+   ]
+  },
+  {
+   "duration": 0.12,
+   "move": 0.22,
+   "panel": "safari-150",
+   "target": "slider-Safari",
+   "point": [
+    0.75,
+    0.5
+   ]
+  },
+  {
+   "duration": 1.4,
+   "panel": "safari-150",
+   "target": "slider-Safari",
+   "point": [
+    0.75,
+    0.5
+   ]
+  },
+  {
+   "duration": 0.3,
+   "move": 0.6,
+   "panel": "safari-150",
+   "target": "output",
+   "caption": "Pick the output device right in the menu"
+  },
+  {
+   "duration": 1.1,
+   "panel": "devices-150",
+   "target": "output",
+   "click": true
+  },
+  {
+   "duration": 0.3,
+   "move": 0.5,
+   "panel": "devices-150",
+   "target": "device-AirPods Pro",
+   "point": [
+    0.3,
+    0.5
+   ]
+  },
+  {
+   "duration": 0.25,
+   "panel": "devices-150",
+   "target": "device-AirPods Pro",
+   "point": [
+    0.3,
+    0.5
+   ],
+   "click": true
+  },
+  {
+   "duration": 1.8,
+   "panel": "airpods",
+   "caption": "Switched to AirPods Pro"
+  },
+  {
+   "duration": 0.3,
+   "move": 0.6,
+   "cursor": [
+    300,
+    600
+   ],
+   "click": true
+  },
+  {
+   "duration": 1.2,
+   "cursor": [
+    300,
+    600
+   ],
+   "caption": "Sound Control: a volume for every app"
+  }
+ ]
+}

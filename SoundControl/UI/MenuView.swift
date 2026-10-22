@@ -31,6 +31,52 @@ struct MenuView: View {
 
 // MARK: Building blocks
 
+/// Switch for settings. Snapshots run in an app that is never active, where AppKit draws a switch that is on in its grey
+/// inactive look; there a drawn copy of the active switch covers it, so the images show the switch as it looks in the open menu.
+struct SettingSwitchStyle: ToggleStyle {
+    @Environment(\.controlSize) private var controlSize
+
+    func makeBody(configuration: Configuration) -> some View {
+        Toggle(configuration)
+            .toggleStyle(.switch)
+            .overlay(alignment: .trailing) {
+                if Runtime.isSnapshot && configuration.isOn {
+                    let mini = controlSize == .mini
+                    Capsule()
+                        .fill(Color.accentColor)
+                        .frame(width: mini ? 32 : 44, height: mini ? 15 : 20)
+                        .overlay(alignment: .trailing) {
+                            Capsule().fill(.white).frame(width: mini ? 19 : 27, height: mini ? 11 : 16).padding(.trailing, 2)
+                        }
+                }
+            }
+    }
+}
+
+extension ToggleStyle where Self == SettingSwitchStyle {
+    static var setting: SettingSwitchStyle { SettingSwitchStyle() }
+}
+
+/// Snapshot mode only: where controls sit in the rendered menu, in points from its top left. Written next to the images as
+/// <base>-targets.json, so the README animations (scripts/compose.swift --scene) can point the cursor at them.
+@MainActor
+enum DemoTargets {
+    static var frames: [String: CGRect] = [:]
+    static func write(to path: String) {
+        let json = frames.mapValues { [$0.minX, $0.minY, $0.width, $0.height].map { ($0 * 10).rounded() / 10 } }
+        try? JSONEncoder().encode(json).write(to: URL(fileURLWithPath: path))
+    }
+}
+
+extension View {
+    /// Records this view's frame for the README animations (snapshots only, see `DemoTargets`).
+    func demoTarget(_ id: String) -> some View {
+        onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+            if Runtime.isSnapshot { DemoTargets.frames[id] = frame }
+        }
+    }
+}
+
 /// Explanation under a setting or status: secondary, wraps to as many lines as it needs and is never truncated.
 /// `fixedSize(vertical:)` makes the menu panel measure the full height; without it the panel cuts the text off.
 struct SettingNote: View {
@@ -127,6 +173,7 @@ struct OutputModule: View {
             DeviceHeader(title: "Output", device: dm.currentOutput, fallback: "speaker.wave.2.fill",
                          value: muted ? "Muted" : percent(level), boosted: model.outputBoosted && !muted,
                          expanded: $expanded)
+                .demoTarget("output")
             HStack(spacing: 6) {
                 CapsuleSlider(
                     value: $m.outputLevel,
@@ -393,6 +440,7 @@ struct DeviceRow: View {
             }
             .buttonStyle(.plain)
             .help(selected ? "This device is currently in use" : "Use this device")
+            .demoTarget("device-\(name)")
             if let toggleHidden {
                 // Hide button only visible on hover so the list stays calm; hidden devices show "Show".
                 // Always present instead of `if hover`: every structural change makes macOS reset the pointer –
@@ -637,6 +685,7 @@ struct AppRow: View {
                     )
                     .simultaneousGesture(TapGesture(count: 2).onEnded { mixer.resetVolume(app.id) })
                     .help("Volume of \(app.name); double-click to reset to 100%")
+                    .demoTarget("slider-\(app.name)")
                 }
                 HStack(spacing: 4) {
                     RoundIconButton(symbol: s.muted ? "speaker.slash.fill" : "speaker.fill", size: 22, active: s.muted,
@@ -702,7 +751,7 @@ struct AppDetail: View {
                 Toggle(isOn: Binding(get: { s.mono }, set: { mixer.setMono($0, for: app.id) })) {
                     Text("Mono").font(.system(size: 11))
                 }
-                .toggleStyle(.switch)
+                .toggleStyle(.setting)
                 .controlSize(.mini)
                 .help("Play the left and right sound as one, so both sides sound the same")
                 Spacer()

@@ -179,7 +179,9 @@ final class DeviceManager {
     private func setUpDemoDefaults() {
         // `--airplay` (as in the other snapshots) makes the AirPlay target the current output.
         let airplay = Runtime.arguments.contains("--airplay")
-        defaultOutput = outputs[airplay ? 3 : 0].id
+        // `--output <index>` picks another invented output device (README animation).
+        let picked = Runtime.value(after: "--output").flatMap(Int.init).map { min(max($0, 0), outputs.count - 1) } ?? 0
+        defaultOutput = outputs[airplay ? 3 : picked].id
         defaultInput = inputs[0].id
         outputVolume = 1; outputMuted = false; inputVolume = 0.62; inputMuted = false
         outputRate = 48000; inputRate = 48000
