@@ -1,0 +1,8 @@
+build/
+DerivedData/
+# Generated from project.yml by XcodeGen
+*.xcodeproj/
+.DS_Store
+
+# Local signing (see Config/Signing.xcconfig)
+Config/Local.xcconfig

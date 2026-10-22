@@ -1,0 +1,47 @@
+name: SoundControl
+options:
+  bundleIdPrefix: io.github.ape97
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+configFiles:
+  Debug: Config/Signing.xcconfig
+  Release: Config/Signing.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: 1.8.7
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_HARDENED_RUNTIME: NO
+    DEAD_CODE_STRIPPING: YES
+targets:
+  SoundControl:
+    type: application
+    platform: macOS
+    sources:
+      - path: SoundControl
+    info:
+      path: SoundControl/Resources/Info.plist
+      properties:
+        CFBundleName: Sound Control
+        CFBundleDisplayName: Sound Control
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.utilities
+        NSAudioCaptureUsageDescription: Sound Control routes each app's audio through its own volume control. This requires access to the apps' audio output.
+        NSLocalNetworkUsageDescription: Sound Control finds AirPlay speakers such as HomePod and Apple TV to show them by name in the output list.
+        NSBonjourServices:
+          - _airplay._tcp
+        NSMicrophoneUsageDescription: Sound Control shows and adjusts your microphone volume.
+        NSHumanReadableCopyright: © 2026 ape97
+    entitlements:
+      path: SoundControl/Resources/SoundControl.entitlements
+      properties:
+        com.apple.security.device.audio-input: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.ape97.soundcontrol
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
