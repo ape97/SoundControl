@@ -32,4 +32,7 @@ tested: macOS=27.0.1 (26A434) Xcode=27.0 SDK=27.0 date=2026-10-16
 - **System Settings → Sound** (footer button) via the URL `x-apple.systempreferences:com.apple.Sound-Settings.extension`.
 - **SMAppService** (login item) – `scripts/status.sh` checks via `sfltool dumpbtm`.
 - **Code signing:** ad-hoc by default. With your own certificate (`Config/Local.xcconfig`) the TCC permission survives reinstalls;
-  with ad-hoc signing it may have to be granted again after each rebuild.
+  with ad-hoc signing it may have to be granted again after each local rebuild. Release zips (`scripts/release.sh`) carry a
+  fixed designated requirement, so the permission survives updates.
+- **GitHub releases API** (`App/UpdateCheck.swift`), only while Check for Updates is on: `GET api.github.com/repos/ape97/SoundControl/releases/latest`,
+  reads `tag_name` and `html_url`, ignores drafts and pre-releases. If GitHub changes this, only the update notice stops working.
