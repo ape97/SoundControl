@@ -12,6 +12,7 @@ tested: macOS=27.0.1 (26A434) Xcode=27.0 SDK=27.0 date=2026-10-16
 - **System audio recording permission** (TCC `kTCCServiceAudioCapture`, private query in `CapturePermission.swift`).
   If the query breaks, the app shows "Allow" although the permission is granted – the self-test reports `permission`.
 - **Process → app** via "responsible PID" (`AudioApps.swift`, private function) – if it breaks, helper processes appear instead of apps.
+  Fallback for root-owned helpers without a responsible PID (e.g. the VM process of a virtualization app): the executable path inside a running app's bundle (`proc_pidpath`, `AppOwnership`).
 - **Device properties** (volume, mute, sample rate, transport) – public HAL API, stable.
 - **MenuBarExtra (.window)**, `NSWindow.didResignKey/didBecomeKey` for collapsing and freezing the order.
   A closed menu = window hidden (`isVisible` false, CGWindowList `onscreen` false).

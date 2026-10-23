@@ -1,5 +1,6 @@
 import AppKit
 import CoreAudio
+import Darwin
 import Observation
 
 /// An app known to Core Audio as an audio client – including all helper processes (e.g. WebContent for Safari).
@@ -152,14 +153,39 @@ final class AudioAppMonitor {
     }
 
     private static func owningApp(pid: pid_t, bundleID: String, regular: [NSRunningApplication]) -> NSRunningApplication? {
-        if let app = regular.first(where: { $0.processIdentifier == pid }) { return app }
-        let rpid = responsiblePID(pid)
-        if let app = regular.first(where: { $0.processIdentifier == rpid }) { return app }
+        let candidates = regular.compactMap { app -> AppOwnership.Candidate? in
+            guard let id = app.bundleIdentifier else { return nil }
+            return .init(pid: app.processIdentifier, bundleID: id, bundlePath: app.bundleURL?.path ?? "")
+        }
+        guard let hit = AppOwnership.owner(pid: pid, bundleID: bundleID, executablePath: Self.executablePath(pid),
+                                           responsiblePID: responsiblePID(pid), among: candidates) else { return nil }
+        return regular.first { $0.processIdentifier == hit.pid }
+    }
+
+    private static func executablePath(_ pid: pid_t) -> String {
+        var buffer = [CChar](repeating: 0, count: 4096)
+        return proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 ? String(cString: buffer) : ""
+    }
+}
+
+/// Decides which regular (Dock) app an audio client process belongs to. Pure logic, covered by the self-test.
+enum AppOwnership {
+    struct Candidate: Equatable {
+        let pid: pid_t
+        let bundleID: String
+        let bundlePath: String
+    }
+
+    static func owner(pid: pid_t, bundleID: String, executablePath: String, responsiblePID: pid_t,
+                      among regular: [Candidate]) -> Candidate? {
+        if let app = regular.first(where: { $0.pid == pid }) { return app }
+        if let app = regular.first(where: { $0.pid == responsiblePID }) { return app }
         // Helper processes such as "com.google.Chrome.helper" belong to the app with the matching prefix.
-        if !bundleID.isEmpty, let app = regular.first(where: {
-            guard let id = $0.bundleIdentifier else { return false }
-            return bundleID.hasPrefix(id + ".")
-        }) { return app }
-        return nil
+        if !bundleID.isEmpty, let app = regular.first(where: { bundleID.hasPrefix($0.bundleID + ".") }) { return app }
+        // Helpers living inside an app bundle whose responsible PID is unavailable (e.g. root-owned VM processes of a
+        // virtualization app, whose bundle ID differs from the app's). The innermost enclosing app wins.
+        return regular
+            .filter { !$0.bundlePath.isEmpty && executablePath.hasPrefix($0.bundlePath + "/") }
+            .max { $0.bundlePath.count < $1.bundlePath.count }
     }
 }

@@ -16,6 +16,7 @@ enum SelfTest {
         checkLimiter()
         checkBalanceAndMono()
         checkPersistence()
+        checkAppOwnership()
         report["permission"] = String(describing: CapturePermission.state)
         report["device"] = [
             "output": AppModel.shared.devices.currentOutput?.name ?? "-",
@@ -144,6 +145,39 @@ enum SelfTest {
             state.process(left: l, right: r, frames: 64, shared: shared)
         }
         expect(abs(l[10] - 0.2) < 0.001 && abs(r[10]) < 0.001, "Balance left + mono wrong:  \(l[10]) / \(r[10])")
+    }
+
+    // MARK: Process → app
+
+    /// Test data modelled on real processes (no live system): browser helpers, a virtualization app whose root-owned
+    /// VM process has no responsible PID and a different bundle ID, and a stray background process that must stay hidden.
+    private static func checkAppOwnership() {
+        typealias C = AppOwnership.Candidate
+        let safari = C(pid: 100, bundleID: "com.apple.Safari", bundlePath: "/Applications/Safari.app")
+        let chrome = C(pid: 200, bundleID: "com.google.Chrome", bundlePath: "/Applications/Google Chrome.app")
+        let vmApp = C(pid: 300, bundleID: "com.vendor.desktop.console", bundlePath: "/Applications/Vendor Desktop.app")
+        let xcode = C(pid: 400, bundleID: "com.apple.dt.Xcode", bundlePath: "/Applications/Xcode.app")
+        let sim = C(pid: 410, bundleID: "com.apple.iphonesimulator",
+                    bundlePath: "/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app")
+        let regular = [safari, chrome, vmApp, xcode, sim]
+        func owner(_ pid: pid_t, _ bundle: String = "", path: String = "", resp: pid_t? = nil) -> pid_t? {
+            AppOwnership.owner(pid: pid, bundleID: bundle, executablePath: path, responsiblePID: resp ?? pid, among: regular)?.pid
+        }
+        expect(owner(100) == 100, "ownership: app itself")
+        expect(owner(101, "com.apple.WebKit.GPU", resp: 100) == 100, "ownership: responsible PID")
+        expect(owner(201, "com.google.Chrome.helper", resp: 201) == 200, "ownership: bundle ID prefix")
+        // Root-owned VM process: no responsible PID, own bundle ID, executable inside the app bundle.
+        let vmPath = "/Applications/Vendor Desktop.app/Contents/MacOS/VM.app/Contents/MacOS/vm_app"
+        expect(owner(301, "com.vendor.vm", path: vmPath, resp: 301) == 300, "ownership: helper inside app bundle")
+        expect(owner(302, "com.vendor.dispatcher",
+                     path: "/Applications/Vendor Desktop.app/Contents/MacOS/Service.app/Contents/MacOS/disp", resp: 302) == 300,
+               "ownership: service inside app bundle")
+        expect(owner(411, "x", path: "/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app/Contents/MacOS/helper") == 410,
+               "ownership: innermost enclosing app wins")
+        // Must stay hidden: system daemons and look-alike paths.
+        expect(owner(500, "com.apple.audiomxd", path: "/usr/sbin/audiomxd") == nil, "ownership: daemon is not an app")
+        expect(owner(501, "", path: "/Applications/Vendor Desktop.app.backup/x") == nil, "ownership: look-alike path")
+        expect(owner(502, "", path: "") == nil, "ownership: unknown path")
     }
 
     // MARK: Persistence
