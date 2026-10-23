@@ -305,15 +305,16 @@ final class AppModel {
 
     var menuBarSymbol: String {
         if devices.outputMuted || outputLevel < 0.001 { return "speaker.slash.fill" }
-        return "speaker.wave.3.fill"
+        return "speaker.wave.2.fill"
     }
 
-    /// Custom template image instead of a text symbol: as large and bold as the Control Center symbols.
+    /// Custom template image instead of a text symbol: same size and weight (14 pt regular) as the other Control apps;
+    /// two waves keep it 20 pt wide like theirs (three waves at the old 15 pt semibold were 27 pt).
     var menuBarImage: NSImage {
         let level = min(outputLevel, 1)
-        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
         let base = NSImage(systemSymbolName: menuBarSymbol, variableValue: level, accessibilityDescription: "Sound Control")
-            ?? NSImage(systemSymbolName: "speaker.wave.3.fill", accessibilityDescription: "Sound Control")!
+            ?? NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "Sound Control")!
         let image = base.withSymbolConfiguration(config) ?? base
         image.isTemplate = true
         return image
