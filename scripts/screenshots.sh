@@ -7,7 +7,7 @@ BIN=SoundControl
 COLORS=(4D9EFF 4D29B3)   # the icon's gradient colours, see scripts/icon.swift
 # page:snapshot arguments (the first page also provides the menu bar icon)
 PAGES=("main:" "apps:--others" "advanced:--advanced" "output:--devices" "airplay:--devices --airplay" "hidden:--devices --hidden Studio"
-       "input:--inputs" "sample-rate:--devices --advanced" "settings:--settings" "confirm:--settings --confirm")
+       "input:--inputs" "sample-rate:--devices --advanced" "settings:--settings" "confirm:--settings --confirm" "update:--update 2.0.0")
 # animation frames: rendered into $RAW only (scripts/scenes/*.json), never composed into README images
 EXTRA=("devices-150:--devices --safari 150" "airpods:--output 1 --safari 150")
 for v in 45 30 20 60 100 125 150; do EXTRA+=("safari-$v:--safari $v"); done

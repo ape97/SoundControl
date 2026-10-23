@@ -28,7 +28,9 @@ enum Runtime {
     static let isSnapshot = arguments.contains("--snapshot")
     static let isSelfTest = arguments.contains("--selftest")
     static let isDemo = arguments.contains("--demo")
-    static let headless = isSnapshot || isSelfTest
+    /// Manual test of the update check from the installed app: one request, result as JSON, no menu.
+    static let isCheckUpdate = arguments.contains("--check-update")
+    static let headless = isSnapshot || isSelfTest || isCheckUpdate
 
     static func value(after flag: String) -> String? {
         guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
@@ -87,8 +89,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
         } else if let path = Runtime.value(after: "--selftest") {
             MainActor.assumeIsolated { SelfTest.run(writingTo: path) }
+        } else if let path = Runtime.value(after: "--check-update") {
+            MainActor.assumeIsolated { UpdateCheck.report(writingTo: path) }
         } else {
             LoginItem.enableOnFirstLaunch()
+            MainActor.assumeIsolated { UpdateCheck.shared.start() }
         }
     }
 
@@ -342,7 +347,7 @@ enum LoginItem {
 }
 
 /// Developer helper: renders the menu content invisibly to PNG files (light and dark) without showing windows.
-/// Usage: SoundControl --snapshot /path/base [--demo]  →  base-light.png, base-dark.png
+/// Usage: SoundControl --snapshot /path/base [--update <version>] [--demo]  →  base-light.png, base-dark.png
 enum Snapshot {
     @MainActor
     static func render(to base: String) {

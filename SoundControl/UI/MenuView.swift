@@ -12,6 +12,7 @@ struct MenuView: View {
             } else {
                 VStack(spacing: 8) {
                     OutputModule()
+                    UpdateNotice()
                     InputModule()
                     AppsModule()
                 }
@@ -22,6 +23,7 @@ struct MenuView: View {
         .padding(10)
         .frame(width: 380)
         .onAppear {
+            UpdateCheck.shared.checkIfDue()
             model.devices.readVolumes()
             model.monitor.refresh()
             model.mixer.refreshPermission()
@@ -108,6 +110,18 @@ struct Module<Content: View>: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(.primary.opacity(scheme == .dark ? 0.08 : 0.05), lineWidth: 0.5)
             )
+    }
+}
+
+/// The app's own icon from the asset catalog, e.g. next to the name in the footer.
+struct AppIcon: View {
+    let size: CGFloat
+    var body: some View {
+        Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage())
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 
@@ -870,6 +884,7 @@ struct PermissionBanner: View {
 
 // MARK: Footer
 
+/// Footer as in all apps: app icon (settings page only) and name on the left, app-specific buttons, then Settings and Quit on the right.
 struct FooterBar: View {
     @Binding var showSettings: Bool
     @Environment(AppModel.self) private var model
@@ -882,6 +897,7 @@ struct FooterBar: View {
                 withAnimation(.snappy(duration: 0.25)) { Features.shared.toggle() }
             }
             .opacity(advanced ? 1 : 0.6)
+            if showSettings { AppIcon(size: 16) }
             Text("Sound Control")
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(.tertiary)

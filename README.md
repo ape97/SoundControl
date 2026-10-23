@@ -35,6 +35,8 @@ Drag an app's slider to turn it down, or beyond 100 % to boost it, while every o
 - **Output boost** up to 200 %: the device regulates itself up to 100 %, above that Sound Control amplifies (shown in orange).
 - **AirPlay rooms** appear by their room name once macOS has connected them.
 - **Advanced mode**: per-app sound profiles, balance, mono and a custom output device, plus a fixed sample rate per device.
+- **Update notice** (optional, off by default): once a day the app looks up the latest release on GitHub and shows
+  "Version X available" in the menu, with **Download** (opens the release page) and **Skip**.
 - **Remembers** your settings per app across restarts; quiet apps collapse under "More Apps", nothing jumps while you drag.
 
 ## Screenshots
@@ -63,6 +65,7 @@ Drag an app's slider to turn it down, or beyond 100 % to boost it, while every o
 </tr>
 <tr>
 <td align="center"><img src="docs/images/confirm-dark.png" width="360"><br>Two-step reset</td>
+<td align="center"><img src="docs/images/update-dark.png" width="360"><br>Update notice in the menu</td>
 </tr>
 </table>
 
@@ -82,7 +85,6 @@ Drag an app's slider to turn it down, or beyond 100 % to boost it, while every o
 
 The app starts at login by default; switch this off under Settings (gear icon) → **Open at Login**.
 To uninstall, quit it from the menu and move it to the Trash.
-Because the app is ad-hoc signed, macOS may ask for the permissions again after an update.
 
 ## Usage
 
@@ -90,7 +92,9 @@ Because the app is ad-hoc signed, macOS may ask for the permissions again after 
 - Drag an app's slider to change only that app; double-click to reset it to 100 %.
 - Open the output or input list to switch or hide devices; hidden ones sit under "Hidden".
 - The small button at the bottom left turns on **advanced mode** (sound profiles, balance, mono, output per app, sample rate).
-- The gear icon opens settings: stored values, a two-step reset and **Open at Login**.
+- The gear icon opens settings: stored values, a two-step reset, **Check for Updates** and **Open at Login**.
+- **Updates**: with **Check for Updates** on, a new version appears in the menu. **Download** opens the release page; replace the
+  app in `/Applications` with the new one. Your settings and permissions stay.
 
 ## Build from source
 
@@ -116,8 +120,10 @@ No Apple developer account is needed. Project layout, scripts, signing, screensh
 - **Microphone**: declared because the app shows and adjusts the volume and mute state of your input device. It does not
   record or listen to your microphone.
 
-Everything stays on your Mac. The only stored data are your settings per app in the app's user defaults. Apart from the
-local Bonjour search there is no network access and no telemetry.
+Everything stays on your Mac, no telemetry. The only stored data are your settings per app in the app's user defaults.
+There are two kinds of network access. The local Bonjour search for AirPlay speakers stays on your network. The optional
+update check (off by default) sends one request per day to `api.github.com` for the latest release number of this
+repository; nothing about you or your Mac is sent.
 
 ## AI-assisted development
 

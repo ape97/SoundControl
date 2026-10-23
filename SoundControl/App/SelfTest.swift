@@ -17,6 +17,7 @@ enum SelfTest {
         checkBalanceAndMono()
         checkPersistence()
         checkAppOwnership()
+        failures += UpdateCheck.selfTest()
         report["permission"] = String(describing: CapturePermission.state)
         report["device"] = [
             "output": AppModel.shared.devices.currentOutput?.name ?? "-",
