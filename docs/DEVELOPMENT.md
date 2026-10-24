@@ -104,6 +104,8 @@ interfaces most likely to change (process taps, the permission query, AirPlay di
   `html_url` are read; a newer version shows a notice in the menu whose **Download** opens the release page. Nothing is
   downloaded or installed by the app.
 - The UI is SwiftUI in a `MenuBarExtra` window; opening and closing is tracked through window key/visibility notifications.
+  The window stays alive while the menu is closed, so a repeating animation keeps redrawing it off screen (about 40 % CPU
+  while any app plays audio). Continuous animations therefore run only while `AppModel.menuIsOpen` is true.
 
 ## Contributing
 
