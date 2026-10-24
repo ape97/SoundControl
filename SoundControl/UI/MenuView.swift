@@ -669,7 +669,7 @@ struct AppRow: View {
                             Image(systemName: "waveform")
                                 .font(.system(size: 9, weight: .bold))
                                 .foregroundStyle(Color.accentColor)
-                                .symbolEffect(.variableColor.iterative, options: .repeating)
+                                .symbolEffect(.variableColor.iterative, options: .repeating, isActive: model.menuIsOpen)
                         }
                         if s.profile != .flat {
                             Image(systemName: s.profile.symbol)

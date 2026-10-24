@@ -316,8 +316,10 @@ enum SelfTest {
                 MainActor.assumeIsolated { first(); step(Array(actions.dropFirst())) }
             }
         }
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
         step([
             {
+                expect(model.menuIsOpen, "UI: opening is not noticed")
                 dm.setHidden(!wasHidden, other)
                 expect(dm.isHidden(other) != wasHidden, "UI: hide/show has no effect")
                 dm.setHidden(wasHidden, other)
@@ -329,11 +331,13 @@ enum SelfTest {
             },
             {
                 expect(model.menuGeneration == generation, "UI: focus loss with menu open resets")
+                expect(model.menuIsOpen, "UI: focus loss with menu open counts as closed")
                 window.orderOut(nil)
                 done.append("Closing the menu")
             },
             {
                 expect(model.menuGeneration == generation + 1, "UI: closing does not reset")
+                expect(!model.menuIsOpen, "UI: closed menu keeps animating")
                 window.close()
                 report["ui"] = done
                 next()

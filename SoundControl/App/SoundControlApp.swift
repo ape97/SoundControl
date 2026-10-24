@@ -125,6 +125,9 @@ final class AppModel {
     @ObservationIgnored private var resignObserver: NSObjectProtocol?
     /// Incremented as soon as the menu window becomes key (opened).
     private(set) var menuOpenCount = 0
+    /// True from opening until the close is confirmed. The closed menu window stays alive, so anything repeating in it
+    /// (the "playing" waveform) must stop on this, or it keeps rendering at ~40 % CPU while audio plays.
+    private(set) var menuIsOpen = false
     @ObservationIgnored private var becomeObserver: NSObjectProtocol?
     /// Windows whose closing is being awaited (one check per window).
     @ObservationIgnored private var closeChecks: Set<ObjectIdentifier> = []
@@ -190,7 +193,10 @@ final class AppModel {
             MainActor.assumeIsolated { AppModel.shared.awaitClose(window) }
         }
         becomeObserver = center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { AppModel.shared.menuOpenCount += 1 }
+            MainActor.assumeIsolated {
+                AppModel.shared.menuOpenCount += 1
+                AppModel.shared.menuIsOpen = true
+            }
         }
     }
 
@@ -211,6 +217,7 @@ final class AppModel {
                     Logger(subsystem: "io.github.ape97.soundcontrol", category: "menu")
                         .notice("Menu closed → reset (\(String(describing: type(of: window)), privacy: .public))")
                     model.menuGeneration += 1
+                    model.menuIsOpen = false
                 }
             }
         }
