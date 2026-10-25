@@ -76,8 +76,26 @@ final class AppMixer {
     @ObservationIgnored private var neutralSince: [String: Date] = [:]
     @ObservationIgnored private var releaseScheduled = false
     @ObservationIgnored private var permissionRequested = false
+    /// Safety net: taps that have not yet delivered any sound. A tap that mutes its app but passes on nothing
+    /// (e.g. a process the system does not let us capture) is removed so the app plays unchanged instead of falling silent.
+    @ObservationIgnored private var unproven: Set<String> = []
+    @ObservationIgnored private var playingSince: [String: Date] = [:]
+    @ObservationIgnored private var guardScheduled = false
+    /// Apps whose tap failed: retried only once the setting, the processes or playback start change.
+    @ObservationIgnored private var blocked: [String: Blocked] = [:]
     @ObservationIgnored private let log = Logger(subsystem: "io.github.ape97.soundcontrol", category: "mixer")
     @ObservationIgnored private let defaults: UserDefaults
+
+    private struct Blocked {
+        let setting: AppSetting
+        let processes: [AudioObjectID]
+        var wasPlaying: Bool
+    }
+
+    /// Playing without a single render call: the tap never started.
+    static let noCallbackLimit: TimeInterval = 3
+    /// Playing without a single non-zero sample while the app should be audible: the tap delivers nothing.
+    static let silenceLimit: TimeInterval = 10
 
     private enum Key {
         static let settings = "appSettings"
@@ -267,7 +285,7 @@ final class AppMixer {
         if canTap {
             for app in apps where taps[app.id] == nil {
                 let s = applied(for: app.id)
-                guard let output = targetOutput(for: s), needsTap(s, output: output) else { continue }
+                guard let output = targetOutput(for: s), needsTap(s, output: output), !isBlocked(app, s) else { continue }
                 do {
                     let tap = try AppTap(processObjects: app.processObjects, outputUID: output,
                                          config: config(for: s, output: output, sampleRate: 48000))
@@ -278,6 +296,8 @@ final class AppMixer {
                     }
                     taps[app.id] = tap
                     failures[app.id] = nil
+                    unproven.insert(app.id)
+                    scheduleGuard()
                     log.info("Tap active:  \(app.id, privacy: .public) → \(output, privacy: .public)")
                 } catch {
                     log.error("Tap for \(app.id, privacy: .public) failed:  \(String(describing: error), privacy: .public)")
@@ -286,6 +306,7 @@ final class AppMixer {
             }
         }
         for id in failures.keys where live[id] == nil || applied(for: id).isNeutral { failures[id] = nil }
+        for id in blocked.keys where live[id] == nil { blocked[id] = nil }
         if activeTapCount != taps.count { activeTapCount = taps.count }
     }
 
@@ -298,6 +319,61 @@ final class AppMixer {
         taps[id]?.stop()
         taps[id] = nil
         neutralSince[id] = nil
+        unproven.remove(id)
+        playingSince[id] = nil
+    }
+
+    // MARK: Safety net
+
+    private func isBlocked(_ app: AudioApp, _ s: AppSetting) -> Bool {
+        guard var b = blocked[app.id] else { return false }
+        if b.setting != s || b.processes != app.processObjects || (app.isPlaying && !b.wasPlaying) {
+            blocked[app.id] = nil
+            return false
+        }
+        b.wasPlaying = app.isPlaying
+        blocked[app.id] = b
+        return true
+    }
+
+    /// Runs once per second only while unproven taps exist; no timer otherwise.
+    private func scheduleGuard() {
+        guard !guardScheduled, !unproven.isEmpty else { return }
+        guardScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.guardScheduled = false
+                self?.checkTaps()
+            }
+        }
+    }
+
+    private func checkTaps() {
+        let now = Date()
+        for id in unproven {
+            guard let tap = taps[id] else { unproven.remove(id); continue }
+            if tap.shared.heard.load(ordering: .relaxed) {
+                unproven.remove(id)
+                playingSince[id] = nil
+                continue
+            }
+            // Silence is expected while the app is paused or muted on purpose.
+            guard let app = apps.first(where: { $0.id == id }), app.isPlaying, applied(for: id).effectiveGain > 0 else {
+                playingSince[id] = nil
+                continue
+            }
+            let playing = now.timeIntervalSince(playingSince[id] ?? now)
+            if playingSince[id] == nil { playingSince[id] = now }
+            let calls = tap.shared.callbacks.load(ordering: .relaxed)
+            if (calls == 0 && playing >= Self.noCallbackLimit) || playing >= Self.silenceLimit {
+                log.error("Tap for \(id, privacy: .public) delivers no sound (\(calls) calls), released")
+                blocked[id] = Blocked(setting: applied(for: id), processes: app.processObjects, wasPlaying: true)
+                failures[id] = "Sound Control can't process this app's audio, so it plays unchanged."
+                drop(id)
+            }
+        }
+        if activeTapCount != taps.count { activeTapCount = taps.count }
+        scheduleGuard()
     }
 
     private func scheduleRelease() {

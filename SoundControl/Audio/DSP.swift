@@ -160,6 +160,9 @@ final class DSPShared: Sendable {
     let meter = Mutex(Meter())
     /// In the self-test: output nothing, only measure.
     let silent: Atomic<Bool>
+    /// Health of the tap, read by the mixer: render calls so far and whether any non-zero sample ever arrived.
+    let callbacks = Atomic<Int>(0)
+    let heard = Atomic<Bool>(false)
 
     init(_ config: DSPConfig, silent: Bool = false) {
         self.config = Mutex(config)

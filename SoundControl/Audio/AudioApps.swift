@@ -3,28 +3,44 @@ import CoreAudio
 import Darwin
 import Observation
 
-/// An app known to Core Audio as an audio client – including all helper processes (e.g. WebContent for Safari).
+/// An audio client as shown in the list: a Dock app including all its helper processes (e.g. WebContent for Safari),
+/// or a standalone process without a Dock app (a Windows program under Wine, a background player).
 struct AudioApp: Identifiable, Equatable {
-    let id: String              // bundle ID of the app, key for stored settings
+    let id: String              // bundle ID of the app (or a standalone key), key for stored settings
     let name: String
     let pid: pid_t
     var processObjects: [AudioObjectID]
     var isPlaying: Bool
+    /// Where the icon of a standalone entry comes from: an app bundle path or a bundle ID. Empty for Dock apps.
+    var iconSource = ""
 
-    var icon: NSImage { AppIconCache.icon(for: pid, bundleID: id) }
+    var icon: NSImage { AppIconCache.icon(for: pid, bundleID: id, source: iconSource) }
 }
 
 enum AppIconCache {
     private static var cache: [String: NSImage] = [:]
 
-    static func icon(for pid: pid_t, bundleID: String) -> NSImage {
+    static func icon(for pid: pid_t, bundleID: String, source: String = "") -> NSImage {
         if let hit = cache[bundleID] { return hit }
-        let image = NSRunningApplication(processIdentifier: pid)?.icon
-            ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID).map { NSWorkspace.shared.icon(forFile: $0.path) }
-            ?? NSWorkspace.shared.icon(for: .applicationBundle)
-        let fixed = IconRaster.fixed(image, points: 24)
+        let image = source.isEmpty
+            ? NSRunningApplication(processIdentifier: pid)?.icon ?? appIcon(bundleID)
+            : source.hasPrefix("/") ? NSWorkspace.shared.icon(forFile: source) : appIcon(source)
+        let fixed = IconRaster.fixed(image ?? NSWorkspace.shared.icon(for: .applicationBundle), points: 24)
         cache[bundleID] = fixed
         return fixed
+    }
+
+    /// Icon of the installed app with this bundle ID or, failing that, of its closest parent ID
+    /// ("com.codeweavers.CrossOver.wineloader" → CrossOver).
+    private static func appIcon(_ bundleID: String) -> NSImage? {
+        var parts = bundleID.split(separator: ".")
+        while parts.count >= 2 {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: parts.joined(separator: ".")) {
+                return NSWorkspace.shared.icon(forFile: url.path)
+            }
+            parts.removeLast()
+        }
+        return nil
     }
 }
 
@@ -120,21 +136,19 @@ final class AudioAppMonitor {
             let pid: pid_t = CA.get(obj, CA.address(kAudioProcessPropertyPID), default: -1)
             guard pid > 0, pid != ownPID else { continue }
             let bundle = CA.string(obj, CA.address(kAudioProcessPropertyBundleID)) ?? ""
-            guard let owner = Self.owningApp(pid: pid, bundleID: bundle, regular: regularApps),
-                  let ownerID = owner.bundleIdentifier, owner.processIdentifier != ownPID else { continue }
+            guard let entry = Self.entry(pid: pid, bundleID: bundle, regular: regularApps) else { continue }
             let running: UInt32 = CA.get(obj, CA.address(kAudioProcessPropertyIsRunningOutput), default: 0)
 
-            if var app = byID[ownerID] {
+            if var app = byID[entry.id] {
                 app.processObjects.append(obj)
                 app.isPlaying = app.isPlaying || running != 0
-                byID[ownerID] = app
+                byID[entry.id] = app
             } else {
-                byID[ownerID] = AudioApp(id: ownerID,
-                                         name: (owner.localizedName ?? ownerID).trimmingCharacters(in: .controlCharacters.union(.whitespaces).union(CharacterSet(charactersIn: "\u{200E}\u{200F}\u{202A}\u{202B}\u{202C}\u{2066}\u{2067}\u{2068}\u{2069}"))),
-                                         pid: owner.processIdentifier,
-                                         processObjects: [obj],
-                                         isPlaying: running != 0)
-                order.append(ownerID)
+                var app = entry
+                app.processObjects = [obj]
+                app.isPlaying = running != 0
+                byID[entry.id] = app
+                order.append(entry.id)
             }
         }
 
@@ -152,23 +166,58 @@ final class AudioAppMonitor {
         }
     }
 
-    private static func owningApp(pid: pid_t, bundleID: String, regular: [NSRunningApplication]) -> NSRunningApplication? {
+    /// The list entry a process belongs to (without process objects yet), or nil for system processes.
+    private static func entry(pid: pid_t, bundleID: String, regular: [NSRunningApplication]) -> AudioApp? {
         let candidates = regular.compactMap { app -> AppOwnership.Candidate? in
             guard let id = app.bundleIdentifier else { return nil }
             return .init(pid: app.processIdentifier, bundleID: id, bundlePath: app.bundleURL?.path ?? "")
         }
-        guard let hit = AppOwnership.owner(pid: pid, bundleID: bundleID, executablePath: Self.executablePath(pid),
-                                           responsiblePID: responsiblePID(pid), among: candidates) else { return nil }
-        return regular.first { $0.processIdentifier == hit.pid }
+        let path = Self.executablePath(pid)
+        switch AppOwnership.resolve(pid: pid, bundleID: bundleID, executablePath: path,
+                                    command: AppOwnership.isWine(bundleID, path) ? Self.commandName(pid) : "",
+                                    responsiblePID: responsiblePID(pid), among: candidates) {
+        case .app(let hit):
+            guard let owner = regular.first(where: { $0.processIdentifier == hit.pid }) else { return nil }
+            return AudioApp(id: hit.bundleID, name: clean(owner.localizedName ?? hit.bundleID), pid: hit.pid,
+                            processObjects: [], isPlaying: false)
+        case .standalone(let id, let name, let icon):
+            return AudioApp(id: id, name: clean(name), pid: pid, processObjects: [], isPlaying: false, iconSource: icon)
+        case nil:
+            return nil
+        }
+    }
+
+    private static func clean(_ name: String) -> String {
+        name.trimmingCharacters(in: .controlCharacters.union(.whitespaces)
+            .union(CharacterSet(charactersIn: "\u{200E}\u{200F}\u{202A}\u{202B}\u{202C}\u{2066}\u{2067}\u{2068}\u{2069}")))
     }
 
     private static func executablePath(_ pid: pid_t) -> String {
         var buffer = [CChar](repeating: 0, count: 4096)
         return proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 ? String(cString: buffer) : ""
     }
+
+    /// The process's argv[0]. Wine replaces it with the Windows path of the program ("C:\Games\Game.exe"), while the
+    /// executable itself is only the Wine loader.
+    private static func commandName(_ pid: pid_t) -> String {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return "" }
+        var buffer = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return "" }
+        // Layout: argc, executable path, zero padding, argv[0], …
+        var i = MemoryLayout<Int32>.size
+        while i < size, buffer[i] != 0 { i += 1 }
+        while i < size, buffer[i] == 0 { i += 1 }
+        let start = i
+        while i < size, buffer[i] != 0 { i += 1 }
+        return String(decoding: buffer[start..<i], as: UTF8.self)
+    }
 }
 
-/// Decides which regular (Dock) app an audio client process belongs to. Pure logic, covered by the self-test.
+/// Decides which list entry an audio client process belongs to. Pure logic, covered by the self-test.
+/// A process is never filed under an app it does not really belong to: a tap on that app would otherwise mute or
+/// change it with the app's settings (e.g. a game started from Terminal while Terminal is muted).
 enum AppOwnership {
     struct Candidate: Equatable {
         let pid: pid_t
@@ -176,16 +225,75 @@ enum AppOwnership {
         let bundlePath: String
     }
 
-    static func owner(pid: pid_t, bundleID: String, executablePath: String, responsiblePID: pid_t,
-                      among regular: [Candidate]) -> Candidate? {
-        if let app = regular.first(where: { $0.pid == pid }) { return app }
-        if let app = regular.first(where: { $0.pid == responsiblePID }) { return app }
+    enum Owner: Equatable {
+        case app(Candidate)
+        /// A process without a Dock app: own entry, own settings. `icon` is an app bundle path or a bundle ID.
+        case standalone(id: String, name: String, icon: String)
+    }
+
+    /// Wine's own service processes, never a sound source of their own.
+    private static let wineServices: Set<String> = [
+        "winedevice.exe", "services.exe", "plugplay.exe", "svchost.exe", "rpcss.exe", "explorer.exe", "conhost.exe",
+        "wineboot.exe", "start.exe", "winemenubuilder.exe", "rundll32.exe",
+    ]
+
+    /// A process of a Wine variant (CrossOver, Wine, Whisky, …): only for these the command name is looked up.
+    static func isWine(_ bundleID: String, _ executablePath: String) -> Bool {
+        bundleID.lowercased().contains("wine") || (executablePath as NSString).lastPathComponent.lowercased().hasPrefix("wine")
+    }
+
+    /// `command` is argv[0], needed only for Wine processes (empty otherwise).
+    static func resolve(pid: pid_t, bundleID: String, executablePath: String, command: String = "", responsiblePID: pid_t,
+                        among regular: [Candidate]) -> Owner? {
+        // Windows programs run as copies of the Wine loader, all with the same bundle ID and sometimes even as Dock apps.
+        // Each one is its own entry, whoever started it.
+        let program = command.split(whereSeparator: { $0 == "\\" || $0 == "/" }).last.map(String.init) ?? ""
+        if program.lowercased().hasSuffix(".exe") {
+            guard !wineServices.contains(program.lowercased()) else { return nil }
+            let name = String(program.dropLast(4))
+            return .standalone(id: "exe:" + name, name: name, icon: bundleID)
+        }
+        if let app = regular.first(where: { $0.pid == pid }) { return .app(app) }
+
+        if let app = regular.first(where: { $0.pid == responsiblePID }), belongs(bundleID, executablePath, to: app) {
+            return .app(app)
+        }
         // Helper processes such as "com.google.Chrome.helper" belong to the app with the matching prefix.
-        if !bundleID.isEmpty, let app = regular.first(where: { bundleID.hasPrefix($0.bundleID + ".") }) { return app }
+        if !bundleID.isEmpty, let app = regular.first(where: { hasPrefix(bundleID, $0.bundleID) }) { return .app(app) }
         // Helpers living inside an app bundle whose responsible PID is unavailable (e.g. root-owned VM processes of a
         // virtualization app, whose bundle ID differs from the app's). The innermost enclosing app wins.
-        return regular
-            .filter { !$0.bundlePath.isEmpty && executablePath.hasPrefix($0.bundlePath + "/") }
-            .max { $0.bundlePath.count < $1.bundlePath.count }
+        if let app = regular
+            .filter({ !$0.bundlePath.isEmpty && executablePath.hasPrefix($0.bundlePath + "/") })
+            .max(by: { $0.bundlePath.count < $1.bundlePath.count }) {
+            return .app(app)
+        }
+        return standalone(bundleID: bundleID, executablePath: executablePath)
+    }
+
+    /// A process started by an app belongs to it if it is the app's own code or a generic tool (a command-line player
+    /// started from Terminal, a system helper). A process with another vendor's bundle ID is a program of its own.
+    private static func belongs(_ bundleID: String, _ path: String, to app: Candidate) -> Bool {
+        bundleID.isEmpty || bundleID.hasPrefix("com.apple.") || bundleID.caseInsensitiveCompare(app.bundleID) == .orderedSame
+            || hasPrefix(bundleID, app.bundleID) || (!app.bundlePath.isEmpty && path.hasPrefix(app.bundlePath + "/"))
+    }
+
+    private static func hasPrefix(_ bundleID: String, _ appID: String) -> Bool {
+        bundleID.lowercased().hasPrefix(appID.lowercased() + ".")
+    }
+
+    /// Own entry for a process without a Dock app, unless it is part of the system.
+    private static func standalone(bundleID: String, executablePath: String) -> Owner? {
+        guard !executablePath.isEmpty, !bundleID.hasPrefix("com.apple."),
+              !["/System/", "/usr/", "/bin/", "/sbin/", "/Library/Apple/", "/Library/Audio/"].contains(where: executablePath.hasPrefix)
+        else { return nil }
+        // Name and icon of the outermost app bundle the executable lives in, else the executable itself.
+        let parts = executablePath.split(separator: "/", omittingEmptySubsequences: false)
+        if let index = parts.firstIndex(where: { $0.hasSuffix(".app") }) {
+            let bundlePath = parts[...index].joined(separator: "/")
+            let name = String(parts[index].dropLast(4))
+            return .standalone(id: bundleID.isEmpty ? "path:" + bundlePath : bundleID, name: name, icon: bundlePath)
+        }
+        let name = (executablePath as NSString).lastPathComponent
+        return .standalone(id: bundleID.isEmpty ? "path:" + executablePath : bundleID, name: name, icon: bundleID)
     }
 }

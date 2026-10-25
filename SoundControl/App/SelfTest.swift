@@ -151,7 +151,8 @@ enum SelfTest {
     // MARK: Process → app
 
     /// Test data modelled on real processes (no live system): browser helpers, a virtualization app whose root-owned
-    /// VM process has no responsible PID and a different bundle ID, and a stray background process that must stay hidden.
+    /// VM process has no responsible PID and a different bundle ID, Windows programs under Wine, programs started from
+    /// Terminal, and system processes that must stay hidden.
     private static func checkAppOwnership() {
         typealias C = AppOwnership.Candidate
         let safari = C(pid: 100, bundleID: "com.apple.Safari", bundlePath: "/Applications/Safari.app")
@@ -160,9 +161,22 @@ enum SelfTest {
         let xcode = C(pid: 400, bundleID: "com.apple.dt.Xcode", bundlePath: "/Applications/Xcode.app")
         let sim = C(pid: 410, bundleID: "com.apple.iphonesimulator",
                     bundlePath: "/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app")
-        let regular = [safari, chrome, vmApp, xcode, sim]
+        let terminal = C(pid: 600, bundleID: "com.apple.Terminal", bundlePath: "/System/Applications/Utilities/Terminal.app")
+        let wineHost = C(pid: 700, bundleID: "com.codeweavers.CrossOver", bundlePath: "/Applications/CrossOver.app")
+        let arc = C(pid: 800, bundleID: "company.thebrowser.Browser", bundlePath: "/Applications/Arc.app")
+        let regular = [safari, chrome, vmApp, xcode, sim, terminal, wineHost, arc]
+        func resolve(_ pid: pid_t, _ bundle: String = "", path: String = "", command: String = "",
+                     resp: pid_t? = nil, among: [C]? = nil) -> AppOwnership.Owner? {
+            AppOwnership.resolve(pid: pid, bundleID: bundle, executablePath: path, command: command,
+                                 responsiblePID: resp ?? pid, among: among ?? regular)
+        }
         func owner(_ pid: pid_t, _ bundle: String = "", path: String = "", resp: pid_t? = nil) -> pid_t? {
-            AppOwnership.owner(pid: pid, bundleID: bundle, executablePath: path, responsiblePID: resp ?? pid, among: regular)?.pid
+            if case .app(let app) = resolve(pid, bundle, path: path, resp: resp) { return app.pid }
+            return nil
+        }
+        func standaloneID(_ pid: pid_t, _ bundle: String = "", path: String = "", resp: pid_t? = nil) -> String? {
+            if case .standalone(let id, _, _) = resolve(pid, bundle, path: path, resp: resp) { return id }
+            return nil
         }
         expect(owner(100) == 100, "ownership: app itself")
         expect(owner(101, "com.apple.WebKit.GPU", resp: 100) == 100, "ownership: responsible PID")
@@ -176,9 +190,37 @@ enum SelfTest {
         expect(owner(411, "x", path: "/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app/Contents/MacOS/helper") == 410,
                "ownership: innermost enclosing app wins")
         // Must stay hidden: system daemons and look-alike paths.
-        expect(owner(500, "com.apple.audiomxd", path: "/usr/sbin/audiomxd") == nil, "ownership: daemon is not an app")
+        expect(resolve(500, "com.apple.audiomxd", path: "/usr/sbin/audiomxd") == nil, "ownership: daemon is not an app")
         expect(owner(501, "", path: "/Applications/Vendor Desktop.app.backup/x") == nil, "ownership: look-alike path")
-        expect(owner(502, "", path: "") == nil, "ownership: unknown path")
+        expect(resolve(502, "", path: "") == nil, "ownership: unknown path")
+        expect(resolve(503, "", path: "/usr/bin/afplay") == nil, "ownership: system tool without app")
+
+        // Windows programs under Wine: the executable is the loader, argv[0] the Windows path. Own entry, never filed
+        // under the starter, the Wine host app or the shared loader bundle ID – even when the loader is a Dock app itself.
+        let loader = "com.codeweavers.CrossOver.wineloader"
+        let wine = "/private/var/folders/xy/T/winetemp-1-2/wineloader"
+        let game = "C:\\Games\\PlateUp!.exe"
+        let plateUp = AppOwnership.Owner.standalone(id: "exe:PlateUp!", name: "PlateUp!", icon: loader)
+        expect(AppOwnership.isWine(loader, wine) && !AppOwnership.isWine("com.apple.Safari", "/x/Safari"), "ownership: Wine detection")
+        expect(resolve(710, loader, path: wine, command: game, resp: 600) == plateUp, "ownership: Windows program started from Terminal")
+        expect(resolve(711, loader, path: wine, command: game, resp: 700) == plateUp, "ownership: Windows program of the Wine host")
+        expect(resolve(712, loader, path: wine, command: game,
+                       among: regular + [C(pid: 712, bundleID: loader, bundlePath: "")]) == plateUp,
+               "ownership: Windows program that is a Dock app")
+        expect(resolve(713, loader, path: wine, command: "C:\\windows\\system32\\winedevice.exe") == nil,
+               "ownership: Wine service hidden")
+        expect(resolve(714, "", path: "/opt/wine/bin/wine64-preloader", command: "/home/x/Game.exe")
+               == .standalone(id: "exe:Game", name: "Game", icon: ""), "ownership: other Wine variant")
+        // Started from Terminal: command-line tools belong to Terminal, other vendors' programs do not.
+        expect(owner(601, "", path: "/opt/homebrew/bin/mpv", resp: 600) == 600, "ownership: tool started from Terminal")
+        expect(standaloneID(602, "org.videolan.vlc", path: "/Applications/VLC.app/Contents/MacOS/VLC", resp: 600) == "org.videolan.vlc",
+               "ownership: foreign app started from Terminal")
+        expect(owner(801, "company.thebrowser.browser.helper", resp: 801) == 800, "ownership: prefix ignores case")
+        // Background players without a Dock app get their own entry.
+        expect(resolve(900, "", path: "/Applications/Player.app/Contents/Helpers/Agent.app/Contents/MacOS/agent")
+               == .standalone(id: "path:/Applications/Player.app", name: "Player", icon: "/Applications/Player.app"),
+               "ownership: background helper named after its app")
+        expect(standaloneID(901, "", path: "/opt/homebrew/bin/mpv") == "path:/opt/homebrew/bin/mpv", "ownership: daemon-less tool")
     }
 
     // MARK: Persistence
@@ -260,14 +302,17 @@ enum SelfTest {
                     tap.update(DSPConfig(gain: 0, balance: 0, mono: false, profile: .flat, sampleRate: tap.sampleRate))
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                         let zero = tap.shared.meter.withLock { $0 }
+                        let calls = tap.shared.callbacks.load(ordering: .relaxed)
+                        let heard = tap.shared.heard.load(ordering: .relaxed)
                         tap.stop()
                         player.terminate()
                         let ratio = half.inRMS > 0 ? half.outRMS / half.inRMS : 0
                         report["liveTap"] = [
                             "sampleRate": tap.sampleRate,
                             "inRMS": half.inRMS, "outRMS": half.outRMS, "ratio": ratio,
-                            "zeroOutRMS": zero.outRMS, "frames": half.frames,
+                            "zeroOutRMS": zero.outRMS, "frames": half.frames, "callbacks": calls, "heard": heard,
                         ]
+                        expect(calls > 0 && heard, "Safety net: tap health not reported (\(calls) calls, heard \(heard))")
                         expect(half.inRMS > 0.005, "Tap delivers no sound (inRMS  \(half.inRMS))")
                         expect(abs(ratio - 0.5) < 0.08, "Tap volume 50 % yields ratio  \(ratio)")
                         expect(zero.outRMS < 0.002, "Tap at 0 % not silent (\(zero.outRMS))")

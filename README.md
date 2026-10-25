@@ -37,6 +37,10 @@ Drag an app's slider to turn it down, or beyond 100 % to boost it, while every o
 - **Advanced mode**: per-app sound profiles, balance, mono and a custom output device, plus a fixed sample rate per device.
 - **Update notice** (optional, off by default): once a day the app looks up the latest release on GitHub and shows
   "Version X available" in the menu, with **Download** (opens the release page) and **Skip**.
+- **Every sound source**: Windows programs under CrossOver/Wine and background players without a Dock icon each get
+  their own row, and a program is only grouped under an app it really belongs to (a game started from Terminal is not "Terminal").
+- **Fail-safe**: if macOS does not deliver an app's audio to Sound Control, the app is released and plays unchanged
+  instead of going silent (marked in the list).
 - **Remembers** your settings per app across restarts; quiet apps collapse under "More Apps", nothing jumps while you drag.
 
 ## Screenshots

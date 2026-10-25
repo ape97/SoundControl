@@ -95,6 +95,8 @@ interfaces most likely to change (process taps, the permission query, AirPlay di
 ## How it works
 
 - Core Audio process taps (`AudioHardwareCreateProcessTap`) capture only apps whose sound is being changed; all other apps run untouched.
+- Each Core Audio process is filed under the Dock app it belongs to (`AppOwnership` in `Audio/AudioApps.swift`): the app itself, its responsible app only if the process is really part of it (no other vendor's bundle ID), a bundle ID prefix, or the enclosing app bundle. Windows programs (any Wine variant: the executable is the Wine loader, argv[0] the Windows path) and processes without a Dock app get entries of their own; system processes stay hidden.
+- Safety net in `AppMixer`: a new tap is watched (once per second, only while unproven) until its first non-zero sample. If the app plays but the tap gets no render calls for 3 s, or only zeros for 10 s while the app should be audible, the tap is released and the app plays unchanged; it is retried after a setting change, a process change or a new playback start.
 - The tapped audio goes through a real-time chain (gain, biquad filters, optional compressor, limiter) and is played via a private aggregate device.
 - Device volume, mute, sample rate and hot-plugging use the Core Audio HAL property API. Devices without their own volume (HDMI etc.) are regulated entirely in software; lowering the volume with the keyboard ends the boost.
 - The System Audio Recording permission (`kTCCServiceAudioCapture`) is queried through a private TCC function in `Audio/CapturePermission.swift`, because without it a tap would mute the app and deliver only silence.

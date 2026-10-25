@@ -150,6 +150,7 @@ final class AppTap {
                                state: DSPState,
                                shared: DSPShared,
                                scratch: UnsafeMutablePointer<Float>) {
+        shared.callbacks.add(1, ordering: .relaxed)
         let outs = UnsafeMutableAudioBufferListPointer(output)
         let ins = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
 
@@ -190,6 +191,7 @@ final class AppTap {
             inSq += Double(l * l + r * r) * 0.5
         }
 
+        if inSq > 0, !shared.heard.load(ordering: .relaxed) { shared.heard.store(true, ordering: .relaxed) }
         state.process(left: left, right: right, frames: frames, shared: shared)
 
         var outSq: Double = 0, peak: Float = 0
